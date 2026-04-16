@@ -11,11 +11,17 @@ def admin_panel_kb() -> InlineKeyboardMarkup:
     builder.button(text="➕ Создать голосование", callback_data="admin:create_poll")
     builder.button(text="👥 Список голосующих",   callback_data="admin:voters:0")
     builder.button(text="📢 Рассылка",            callback_data="admin:broadcast")
+    builder.button(text="🏁 Завершить текущий опрос", callback_data="admin:close_poll_check")
     builder.adjust(1)
     return builder.as_markup()
 
 
-
+def confirm_close_poll_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Да, завершить", callback_data="admin:close_poll_confirm")
+    builder.button(text="❌ Отмена", callback_data="admin:back")
+    builder.adjust(2)
+    return builder.as_markup()
 
 def add_artist_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()

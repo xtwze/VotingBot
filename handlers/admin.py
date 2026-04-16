@@ -1,3 +1,5 @@
+import asyncio
+
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -12,9 +14,14 @@ from states import CreatePoll, Broadcast
 router = Router()
 
 
-def is_admin(user_id: int) -> bool:
-    return user_id in ADMIN_IDS
+async def is_admin(user_id: int) -> bool:
+    # Проверка по списку из config.py
+    if user_id in ADMIN_IDS:
+        return True
 
+    # Проверка по базе данных
+    db_admins = await db.get_admins()  # Тут нужен await, поэтому и функция async
+    return user_id in db_admins
 
 # --- Вход в админку ---
 @router.message(Command("admin"))
@@ -347,14 +354,18 @@ async def cb_admin_delete_vote(callback: CallbackQuery, bot: Bot):
     _, poll_id, user_id = callback.data.split(":")
     poll_id, user_id = int(poll_id), int(user_id)
 
-    # 1. Пытаемся удалить голос из БД
+    # Пытаемся удалить голос и заблокировать
     if await db.delete_vote_by_user(poll_id, user_id):
-        # 2. Блокируем пользователя
         await db.block_user(user_id)
 
-        # 3. Обновляем сообщение у админа, чтобы он видел результат
+        # Генерируем команду для быстрого копирования
+        unblock_command = f"<code>/unblock {user_id}</code>"
+
+        # Обновляем сообщение у админа
         await callback.message.edit_text(
-            f"{callback.message.text}\n\n{text.VOTE_DELETED_ADMIN}",
+            f"{callback.message.text}\n\n"
+            f"🗑 <b>Голос удалён. Пользователь заблокирован.</b>\n"
+            f"Разблокировать: {unblock_command} (нажмте на команду чтобы скопировать)",
             parse_mode="HTML"
         )
 
@@ -371,7 +382,7 @@ async def cb_admin_delete_vote(callback: CallbackQuery, bot: Bot):
 
 @router.message(Command("add_admin"))
 async def cmd_add_admin(message: Message):
-    if not await is_admin(message.from_user.id):
+    if not is_admin(message.from_user.id):
         await message.answer(text.NOT_ADMIN)
         return
 
@@ -390,3 +401,67 @@ async def cmd_add_admin(message: Message):
         await message.bot.send_message(new_admin_id, "🎉 Вам выданы права администратора. Используйте /admin для входа.")
     except:
         pass
+
+
+# --- Проверка перед завершением ---
+@router.callback_query(F.data == "admin:close_poll_check")
+async def cb_close_poll_check(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        return
+
+    poll = await db.get_active_poll()
+    if not poll:
+        await callback.answer("❌ Нет активных опросов.", show_alert=True)
+        return
+
+    options = await db.get_poll_options(poll["id"])
+
+    # Формируем информацию о текущем опросе
+    info_text = (
+        f"🏁 <b>Завершение опроса</b>\n\n"
+        f"Тема: <b>{poll['title']}</b>\n"
+        f"Текущие голоса:\n"
+    )
+    for opt in options:
+        info_text += f"• {opt['name']} — {opt['votes']}\n"
+
+    info_text += "\nВы уверены, что хотите закрыть этот опрос? Больше никто не сможет проголосовать."
+
+    await callback.message.edit_text(
+        info_text,
+        reply_markup=ctrl.confirm_close_poll_kb(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+# --- Подтверждение завершения ---
+@router.callback_query(F.data == "admin:close_poll_confirm")
+async def cb_close_poll_confirm(callback: CallbackQuery, bot: Bot):
+    if not await is_admin(callback.from_user.id):
+        return
+
+    poll = await db.get_active_poll()
+    if poll:
+        # 1. Получаем итоги для рассылки
+        top = await db.get_poll_top(poll["id"])
+        res_text = text.poll_results(poll["title"], top)
+
+        # 2. Закрываем в базе (нужно добавить функцию в db.py, если её нет)
+        await db.close_poll(poll["id"])
+
+        # 3. Рассылаем итоги всем
+        users = await db.get_all_users()
+        for u in users:
+            try:
+                await bot.send_message(u["user_id"], f"📊 <b>Опрос завершен!</b>\n\n{res_text}", parse_mode="HTML")
+            except:
+                continue
+
+        await callback.message.edit_text("✅ Опрос успешно закрыт, итоги разосланы.")
+    else:
+        await callback.message.edit_text("❌ Опрос уже был закрыт.")
+
+    # Возврат в админку через 2 секунды (опционально)
+    await asyncio.sleep(2)
+    await cmd_admin(callback.message, None)  # Вызов функции админки

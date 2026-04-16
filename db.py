@@ -280,3 +280,9 @@ async def get_admins() -> list[int]:
         async with db.execute("SELECT user_id FROM admins") as cur:
             rows = await cur.fetchall()
             return [r[0] for r in rows]
+
+
+async def close_poll(poll_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE polls SET is_active = 0 WHERE id = ?", (poll_id,))
+        await db.commit()
