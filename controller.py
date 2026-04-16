@@ -25,15 +25,22 @@ def add_artist_kb() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-
-
 def poll_options_kb(poll_id: int, options: list[dict]) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+
+    # Кнопки артистов
     for opt in options:
         builder.button(
             text=f"{opt['name']}  [{opt['votes']}]",
             callback_data=f"vote:{poll_id}:{opt['id']}:{opt['name']}",
         )
+
+    # Кнопка обновления результатов
+    builder.button(
+        text="🔄 Обновить результаты",
+        callback_data=f"poll:refresh:{poll_id}"
+    )
+
     builder.adjust(1)
     return builder.as_markup()
 
