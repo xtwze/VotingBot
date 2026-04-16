@@ -16,6 +16,7 @@ def admin_panel_kb() -> InlineKeyboardMarkup:
 
 
 
+
 def add_artist_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="🎤 Добавить артиста",       callback_data="poll:add_artist")
@@ -97,5 +98,5 @@ def broadcast_confirm_kb() -> InlineKeyboardMarkup:
 
 def back_to_admin_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="🔙 Назад", callback_data="admin:back")
+    builder.button(text="🔙 В админ-панель", callback_data="admin:back")
     return builder.as_markup()

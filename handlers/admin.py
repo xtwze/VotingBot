@@ -26,6 +26,22 @@ async def cmd_admin(message: Message, state: FSMContext):
     await message.answer(text.ADMIN_PANEL, reply_markup=ctrl.admin_panel_kb(), parse_mode="HTML")
 
 
+# ── Возврат в админ-панель ────────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "admin:back")
+async def cb_admin_back(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+
+    await state.clear()  # Сбрасываем состояния, если админ был в процессе создания опроса или рассылки
+    await callback.message.edit_text(
+        text.ADMIN_PANEL,
+        reply_markup=ctrl.admin_panel_kb(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
 # --- Создание опроса: Шаг 1 (Тема) ---
 @router.callback_query(F.data == "admin:create_poll")
 async def cb_create_poll(callback: CallbackQuery, state: FSMContext):
