@@ -91,12 +91,26 @@ def broadcast_confirm_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Отправить",   callback_data="broadcast:confirm")
     builder.button(text="✏️ Редактировать", callback_data="broadcast:edit")
-    builder.button(text="❌ Отмена",       callback_data="broadcast:cancel")
-    builder.adjust(2, 1)
+    builder.adjust(2)
     return builder.as_markup()
 
 
 def back_to_admin_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="🔙 В админ-панель", callback_data="admin:back")
+    return builder.as_markup()
+
+def cancel_creation_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 Отмена (Назад)", callback_data="admin:back")
+    return builder.as_markup()
+
+def cancel_broadcast_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 Отмена", callback_data="admin:back")
+    return builder.as_markup()
+
+def cancel_creation_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 Отмена (Назад)", callback_data="admin:back")
     return builder.as_markup()

@@ -42,12 +42,31 @@ async def cb_admin_back(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+@router.callback_query(F.data == "broadcast:edit", Broadcast.confirming)
+async def cb_broadcast_edit(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(Broadcast.waiting_text)
+    await callback.message.edit_text(
+        text.ASK_BROADCAST_TEXT,
+        reply_markup=ctrl.cancel_broadcast_kb(), # Добавляем и сюда
+        parse_mode="HTML"
+    )
+    await callback.answer()
+    await callback.answer()
+
+
 # --- Создание опроса: Шаг 1 (Тема) ---
 @router.callback_query(F.data == "admin:create_poll")
 async def cb_create_poll(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id): return
+    if not is_admin(callback.from_user.id):
+        return
+
     await state.set_state(CreatePoll.waiting_title)
-    await callback.message.edit_text(text.ASK_POLL_TITLE, parse_mode="HTML")
+    # Добавляем reply_markup с кнопкой назад
+    await callback.message.edit_text(
+        text.ASK_POLL_TITLE,
+        reply_markup=ctrl.cancel_creation_kb(),
+        parse_mode="HTML"
+    )
 
 
 @router.message(CreatePoll.waiting_title)
@@ -186,8 +205,19 @@ async def cmd_delete_voice(message: Message, bot: Bot):
 # --- Рассылка ---
 @router.callback_query(F.data == "admin:broadcast")
 async def cb_broadcast(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+
     await state.set_state(Broadcast.waiting_text)
-    await callback.message.edit_text(text.ASK_BROADCAST_TEXT)
+    # Добавляем кнопку назад к сообщению с просьбой ввести текст
+    await callback.message.edit_text(
+        text.ASK_BROADCAST_TEXT,
+        reply_markup=ctrl.cancel_broadcast_kb(),  # Используем новую клавиатуру
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
 
 
 @router.message(Broadcast.waiting_text)
