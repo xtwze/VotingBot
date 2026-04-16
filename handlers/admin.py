@@ -97,13 +97,48 @@ async def cb_add_artist_btn(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text("✏️ Введите имя артиста:")
 
 
-@router.message(CreatePoll.waiting_artist_name)
+@router.message(CreatePoll.adding_options)
+@router.message(CreatePoll.waiting_artist_name)  # Обрабатываем оба состояния для удобства
 async def process_artist_name(message: Message, state: FSMContext):
-    data = await state.get_data()
-    await db.add_poll_option(data["poll_id"], message.text.strip())
-    await state.set_state(CreatePoll.adding_options)
-    await message.answer(text.ARTIST_ADDED, reply_markup=ctrl.add_artist_kb(), parse_mode="HTML")
+    if not is_admin(message.from_user.id):
+        return
 
+    # Получаем данные из состояния
+    data = await state.get_data()
+    poll_id = data.get("poll_id")
+    artist_name = message.text.strip()
+
+    if not artist_name:
+        await message.answer("❌ Имя артиста не может быть пустым. Введите имя:")
+        return
+
+    # 1. Добавляем артиста в базу данных
+    await db.add_poll_option(poll_id, artist_name)
+
+    # 2. Переключаем состояние (на случай, если пришли из waiting_artist_name)
+    await state.set_state(CreatePoll.adding_options)
+
+    # 3. Получаем актуальный список всех уже добавленных артистов для этого опроса
+    options = await db.get_poll_options(poll_id)
+
+    # 4. Формируем текстовый список артистов
+    artists_list_str = ""
+    for i, opt in enumerate(options, 1):
+        artists_list_str += f"{i}. <b>{opt['name']}</b>\n"
+
+    # 5. Формируем и отправляем ответ
+    reply_text = (
+        f"✅ Артист <b>{artist_name}</b> успешно добавлен!\n\n"
+        f"<b>Текущий список участников:</b>\n"
+        f"{artists_list_str}\n"
+        f"Вы можете отправить имя <u>следующего</u> артиста или завершить создание опроса кнопкой ниже 👇"
+    )
+
+    await message.answer(
+        reply_text,
+        reply_markup=ctrl.add_artist_kb(),
+        parse_mode="HTML"
+    )
 
 @router.callback_query(F.data == "poll:finish", CreatePoll.adding_options)
 async def cb_finish_poll(callback: CallbackQuery, state: FSMContext, bot: Bot):
