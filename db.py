@@ -22,6 +22,7 @@ async def init_db():
                 created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
         await db.execute("""
                          CREATE TABLE IF NOT EXISTS admins
                          (
@@ -265,6 +266,8 @@ async def unblock_user(user_id: int) -> bool:
         )
         await db.commit()
         return cur.rowcount > 0
+
+
 
 
 async def add_admin(user_id: int):

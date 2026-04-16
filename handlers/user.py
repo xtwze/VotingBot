@@ -201,6 +201,8 @@ async def cb_poll_refresh(callback: CallbackQuery, state: FSMContext):
         else:
             await callback.answer()
 
+
+
 @router.message(Command("myid"))
 async def cmd_myid(message: Message):
     await message.answer(str(message.from_user.id))
