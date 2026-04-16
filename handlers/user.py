@@ -1,7 +1,7 @@
 import time
 
 from aiogram import Router, F, Bot
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, FSInputFile
 
@@ -200,3 +200,7 @@ async def cb_poll_refresh(callback: CallbackQuery, state: FSMContext):
             await callback.answer("Изменений нет")
         else:
             await callback.answer()
+
+@router.message(Command("myid"))
+async def cmd_myid(message: Message):
+    await message.answer(str(message.from_user.id))

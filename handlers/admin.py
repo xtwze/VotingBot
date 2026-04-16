@@ -12,14 +12,17 @@ from states import CreatePoll, Broadcast
 router = Router()
 
 
-def is_admin(user_id: int) -> bool:
-    return user_id in ADMIN_IDS
+async def is_admin(user_id: int) -> bool:
+    if user_id in ADMIN_IDS:
+        return True
+    db_admins = await db.get_admins()
+    return user_id in db_admins
 
 
 # --- Вход в админку ---
 @router.message(Command("admin"))
 async def cmd_admin(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
+    if not await is_admin(message.from_user.id):
         await message.answer(text.NOT_ADMIN)
         return
     await state.clear()
@@ -30,7 +33,7 @@ async def cmd_admin(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "admin:back")
 async def cb_admin_back(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         return
 
     await state.clear()  # Сбрасываем состояния, если админ был в процессе создания опроса или рассылки
@@ -57,7 +60,7 @@ async def cb_broadcast_edit(callback: CallbackQuery, state: FSMContext):
 # --- Создание опроса: Шаг 1 (Тема) ---
 @router.callback_query(F.data == "admin:create_poll")
 async def cb_create_poll(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         return
 
     await state.set_state(CreatePoll.waiting_title)
@@ -70,7 +73,7 @@ async def cb_create_poll(callback: CallbackQuery, state: FSMContext):
 
 
 @router.message(CreatePoll.waiting_title)
-async def process_poll_title(message: Message, state: FSMContext):
+async def process_poll_title(message: Message, state: FSMContext, bot: Bot):  # Добавьте bot: Bot
     title = message.text.strip()
 
     # Перед созданием нового, подводим итоги старого
@@ -78,12 +81,19 @@ async def process_poll_title(message: Message, state: FSMContext):
     if prev:
         top = await db.get_poll_top(prev["id"])
         res_text = text.poll_results(prev["title"], top)
-        for admin_id in ADMIN_IDS:
-            try:
-                await message.bot.send_message(admin_id, res_text, parse_mode="HTML")
-            except:
-                pass
 
+        # Получаем всех пользователей из базы
+        all_users = await db.get_all_users()
+
+        # Рассылка итогов ВСЕМ пользователям
+        for user in all_users:
+            try:
+                await bot.send_message(user["user_id"], res_text, parse_mode="HTML")
+            except Exception:
+                # Пропускаем тех, кто заблокировал бота
+                continue
+
+    # Создаем новый опрос
     poll_id = await db.create_poll(title)
     await state.update_data(poll_id=poll_id)
     await state.set_state(CreatePoll.adding_options)
@@ -100,7 +110,7 @@ async def cb_add_artist_btn(callback: CallbackQuery, state: FSMContext):
 @router.message(CreatePoll.adding_options)
 @router.message(CreatePoll.waiting_artist_name)  # Обрабатываем оба состояния для удобства
 async def process_artist_name(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
+    if not await is_admin(message.from_user.id):
         return
 
     # Получаем данные из состояния
@@ -233,7 +243,7 @@ async def cb_voters_list(callback: CallbackQuery):
 # --- Удаление голоса (команда) ---
 @router.message(Command("delete_voice"))
 async def cmd_delete_voice(message: Message, bot: Bot):
-    if not is_admin(message.from_user.id): return
+    if not await is_admin(message.from_user.id): return
     args = message.text.split()
     if len(args) < 2:
         await message.answer("Формат: /delete_voice @username или ID")
@@ -261,7 +271,7 @@ async def cmd_delete_voice(message: Message, bot: Bot):
 # --- Рассылка ---
 @router.callback_query(F.data == "admin:broadcast")
 async def cb_broadcast(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         return
 
     await state.set_state(Broadcast.waiting_text)
@@ -302,7 +312,7 @@ async def cb_broadcast_send(callback: CallbackQuery, state: FSMContext):
 # --- Разблокировка юзера ---
 @router.message(Command("unblock"))
 async def cmd_unblock(message: Message, bot: Bot):
-    if not is_admin(message.from_user.id):
+    if not await is_admin(message.from_user.id):
         return
 
     args = message.text.split()
@@ -340,7 +350,7 @@ async def cmd_unblock(message: Message, bot: Bot):
 # --- Обработка кнопки "Удалить голос" из уведомления ---
 @router.callback_query(F.data.startswith("admin_delete_vote:"))
 async def cb_admin_delete_vote(callback: CallbackQuery, bot: Bot):
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         return
 
     # Извлекаем данные: admin_delete_vote:poll_id:user_id
@@ -367,3 +377,26 @@ async def cb_admin_delete_vote(callback: CallbackQuery, bot: Bot):
         await callback.answer(text.VOTE_NOT_FOUND, show_alert=True)
 
     await callback.answer()
+
+
+@router.message(Command("add_admin"))
+async def cmd_add_admin(message: Message):
+    if not await is_admin(message.from_user.id):
+        await message.answer(text.NOT_ADMIN)
+        return
+
+    args = message.text.split()
+    if len(args) < 2 or not args[1].isdigit():
+        await message.answer("📝 Используйте: `/add_admin 12345678` (где цифры — это ID пользователя)")
+        return
+
+    new_admin_id = int(args[1])
+    await db.add_admin(new_admin_id)
+
+    await message.answer(f"✅ Пользователь <code>{new_admin_id}</code> теперь администратор.", parse_mode="HTML")
+
+    # Попытка уведомить нового админа
+    try:
+        await message.bot.send_message(new_admin_id, "🎉 Вам выданы права администратора. Используйте /admin для входа.")
+    except:
+        pass

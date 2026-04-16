@@ -23,6 +23,15 @@ async def init_db():
             )
         """)
         await db.execute("""
+                         CREATE TABLE IF NOT EXISTS admins
+                         (
+                             user_id
+                             INTEGER
+                             PRIMARY
+                             KEY
+                         )
+                         """)
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS poll_options (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 poll_id     INTEGER NOT NULL,
@@ -256,3 +265,15 @@ async def unblock_user(user_id: int) -> bool:
         )
         await db.commit()
         return cur.rowcount > 0
+
+
+async def add_admin(user_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("INSERT OR IGNORE INTO admins (user_id) VALUES (?)", (user_id,))
+        await db.commit()
+
+async def get_admins() -> list[int]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT user_id FROM admins") as cur:
+            rows = await cur.fetchall()
+            return [r[0] for r in rows]
