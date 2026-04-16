@@ -335,3 +335,35 @@ async def cmd_unblock(message: Message, bot: Bot):
             await message.answer(text.USER_NOT_BLOCKED_OR_NOT_FOUND)
     else:
         await message.answer(text.USER_NOT_FOUND)
+
+
+# --- Обработка кнопки "Удалить голос" из уведомления ---
+@router.callback_query(F.data.startswith("admin_delete_vote:"))
+async def cb_admin_delete_vote(callback: CallbackQuery, bot: Bot):
+    if not is_admin(callback.from_user.id):
+        return
+
+    # Извлекаем данные: admin_delete_vote:poll_id:user_id
+    _, poll_id, user_id = callback.data.split(":")
+    poll_id, user_id = int(poll_id), int(user_id)
+
+    # 1. Пытаемся удалить голос из БД
+    if await db.delete_vote_by_user(poll_id, user_id):
+        # 2. Блокируем пользователя
+        await db.block_user(user_id)
+
+        # 3. Обновляем сообщение у админа, чтобы он видел результат
+        await callback.message.edit_text(
+            f"{callback.message.text}\n\n{text.VOTE_DELETED_ADMIN}",
+            parse_mode="HTML"
+        )
+
+        # 4. Уведомляем пользователя (по желанию)
+        try:
+            await bot.send_message(user_id, "🚫 Ваш голос аннулирован, вы заблокированы за нарушение.")
+        except:
+            pass
+    else:
+        await callback.answer(text.VOTE_NOT_FOUND, show_alert=True)
+
+    await callback.answer()
