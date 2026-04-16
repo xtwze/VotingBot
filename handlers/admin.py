@@ -87,14 +87,54 @@ async def process_artist_name(message: Message, state: FSMContext):
 
 
 @router.callback_query(F.data == "poll:finish", CreatePoll.adding_options)
-async def cb_finish_poll(callback: CallbackQuery, state: FSMContext):
+async def cb_finish_poll(callback: CallbackQuery, state: FSMContext, bot: Bot):
     data = await state.get_data()
-    options = await db.get_poll_options(data["poll_id"])
+    poll_id = data.get("poll_id")
+
+    options = await db.get_poll_options(poll_id)
     if not options:
         await callback.answer(text.POLL_NEED_OPTIONS, show_alert=True)
         return
+
+    # 1. Завершаем состояние админа
     await state.clear()
     await callback.message.edit_text(text.POLL_CREATED, reply_markup=ctrl.back_to_admin_kb())
+
+    # 2. Получаем данные нового опроса для рассылки
+    poll = await db.get_active_poll()
+    if not poll:
+        return
+
+    msg_text = text.poll_message(poll["title"], options)
+    kb = ctrl.poll_options_kb(poll["id"], options)
+
+    # 3. Рассылка всем пользователям
+    users = await db.get_all_users()
+    sent_count = 0
+
+    # Чтобы не импортировать active_poll_messages (из-за риска цикличности),
+    # мы просто делаем рассылку.
+    # Если вы хотите, чтобы эти сообщения ТОЖЕ обновлялись раз в 2 секунды,
+    # их нужно добавить в словарь active_poll_messages в main.py.
+
+    from main import active_poll_messages  # Импорт внутри функции, чтобы избежать ошибок
+
+    for user in users:
+        try:
+            sent_msg = await bot.send_message(
+                user["user_id"],
+                msg_text,
+                reply_markup=kb,
+                parse_mode="HTML"
+            )
+            # Добавляем сообщение в список для "Live-обновления"
+            active_poll_messages[(sent_msg.chat.id, sent_msg.message_id)] = poll["id"]
+            sent_count += 1
+        except Exception:
+            # Пропускаем, если пользователь заблокировал бота
+            pass
+
+    await callback.message.answer(f"📢 Опрос разослан {sent_count} пользователям.")
 
 
 # --- Список голосующих (Пагинация) ---
