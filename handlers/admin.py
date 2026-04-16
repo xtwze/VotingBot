@@ -210,3 +210,42 @@ async def cb_broadcast_send(callback: CallbackQuery, state: FSMContext):
             pass
     await state.clear()
     await callback.message.edit_text(f"✅ Рассылка завершена. Получили: {count}")
+
+
+
+# --- Разблокировка юзера ---
+@router.message(Command("unblock"))
+async def cmd_unblock(message: Message, bot: Bot):
+    if not is_admin(message.from_user.id):
+        return
+
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer("Введите: /unblock @username или ID")
+        return
+
+    target = args[1]
+    user_data = None
+
+    # Поиск юзера
+    if target.startswith("@"):
+        user_data = await db.find_user_by_username(target)
+    else:
+        try:
+            user_data = await db.find_user_by_id(int(target))
+        except ValueError:
+            await message.answer("Некорректный ID.")
+            return
+
+    if user_data:
+        success = await db.unblock_user(user_data["user_id"])
+        if success:
+            await message.answer(f"✅ Пользователь {target} разблокирован.")
+            try:
+                await bot.send_message(user_data["user_id"], "😇 Вы были разблокированы администратором.")
+            except:
+                pass
+        else:
+            await message.answer(text.USER_NOT_BLOCKED_OR_NOT_FOUND)
+    else:
+        await message.answer(text.USER_NOT_FOUND)

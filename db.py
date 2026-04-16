@@ -246,3 +246,13 @@ async def find_user_by_id(user_id: int) -> Optional[dict]:
         ) as cur:
             row = await cur.fetchone()
     return {"user_id": row[0], "username": row[1]} if row else None
+
+
+async def unblock_user(user_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "UPDATE users SET is_blocked = 0 WHERE user_id = ?",
+            (user_id,)
+        )
+        await db.commit()
+        return cur.rowcount > 0
