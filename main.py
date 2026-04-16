@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
+from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import BOT_TOKEN, ADMIN_IDS
@@ -70,10 +71,10 @@ def _patch_user_handler():
     original = user_mod.send_active_poll
 
     async def patched(target, user_id: int):
+        from handlers import user as user_mod
         import db as _db
         import text as _text
         import controller as _ctrl
-        from aiogram.types import Message, CallbackQuery
 
         poll = await _db.get_active_poll()
         if not poll:
@@ -92,6 +93,13 @@ def _patch_user_handler():
             sent = await target.answer(msg_text, reply_markup=kb, parse_mode="HTML")
         else:
             sent = await target.message.answer(msg_text, reply_markup=kb, parse_mode="HTML")
+
+        # --- НОВАЯ ЧАСТЬ: ЗАКРЕПЛЕНИЕ ---
+        try:
+            await sent.bot.pin_chat_message(chat_id=sent.chat.id, message_id=sent.message_id)
+        except Exception:
+            pass # Если не удалось закрепить (например, юзер заблокировал бота в ту же секунду)
+        # -------------------------------
 
         active_poll_messages[(sent.chat.id, sent.message_id)] = poll["id"]
 

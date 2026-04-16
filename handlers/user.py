@@ -1,4 +1,4 @@
-from aiogram import Router, F
+from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery
 
@@ -30,7 +30,6 @@ async def cmd_start(message: Message):
     await message.answer(text.WELCOME, parse_mode="HTML")
     await send_active_poll(message, user_id)
 
-
 # --- Выбор варианта (первое нажатие) ---
 @router.callback_query(F.data.startswith("vote:"))
 async def cb_vote_choose(callback: CallbackQuery):
@@ -56,10 +55,10 @@ async def cb_vote_choose(callback: CallbackQuery):
     await callback.answer()
 
 
-# --- Подтверждение голоса ---
 @router.callback_query(F.data.startswith("vote_confirm:"))
-async def cb_vote_confirm(callback: CallbackQuery):
+async def cb_vote_confirm(callback: CallbackQuery, bot: Bot):
     from config import ADMIN_IDS
+    from main import active_poll_messages  # Импорт для регистрации сообщения
 
     user_id = callback.from_user.id
     username = callback.from_user.username
@@ -75,24 +74,31 @@ async def cb_vote_confirm(callback: CallbackQuery):
         await callback.answer(text.ALREADY_VOTED, show_alert=True)
         return
 
-    # Записываем в БД
+    # 1. Записываем голос в БД
     await db.cast_vote(poll_id, option_id, user_id)
 
-    # Получаем данные для уведомления админов
+    # 2. Получаем актуальные данные опроса для отображения рейтинга
+    poll = await db.get_active_poll()
     options = await db.get_poll_options(poll_id)
     option_name = next((o["name"] for o in options if o["id"] == option_id), "—")
-    poll = await db.get_active_poll()
 
-    await callback.message.edit_text(text.VOTE_ACCEPTED, parse_mode="HTML")
+    # Формируем новое сообщение: Благодарность + Рейтинг
+    new_text = f" <b>{text.VOTE_ACCEPTED}</b>\n\n" + text.poll_message(poll["title"], options)
+    kb = ctrl.poll_options_kb(poll_id, options)
+
+    # 3. Редактируем сообщение (теперь оно будет содержать рейтинг и кнопки)
+    await callback.message.edit_text(new_text, reply_markup=kb, parse_mode="HTML")
     await callback.answer()
 
-    # Уведомление админов
+    # Добавляем это отредактированное сообщение в систему "Live-обновления"
+    active_poll_messages[(callback.message.chat.id, callback.message.message_id)] = poll_id
+
+    # 4. Уведомление админов (остается без изменений)
     notify_text = text.admin_vote_notify(username, user_id, option_name, poll["title"])
     admin_kb = ctrl.delete_vote_kb(poll_id, user_id)
-
     for admin_id in ADMIN_IDS:
         try:
-            await callback.bot.send_message(admin_id, notify_text, reply_markup=admin_kb, parse_mode="HTML")
+            await bot.send_message(admin_id, notify_text, reply_markup=admin_kb, parse_mode="HTML")
         except Exception:
             pass
 

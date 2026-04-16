@@ -115,6 +115,39 @@ async def cb_finish_poll(callback: CallbackQuery, state: FSMContext, bot: Bot):
         await callback.answer(text.POLL_NEED_OPTIONS, show_alert=True)
         return
 
+    await state.clear()
+    await callback.message.edit_text(text.POLL_CREATED, reply_markup=ctrl.back_to_admin_kb())
+
+    poll = await db.get_active_poll()
+    if not poll: return
+
+    msg_text = text.poll_message(poll["title"], options)
+    kb = ctrl.poll_options_kb(poll["id"], options)
+
+    users = await db.get_all_users()
+
+    # Импорт словаря для live-обновления
+    from main import active_poll_messages
+
+    for user in users:
+        try:
+            # 1. Отправляем сообщение
+            sent_msg = await bot.send_message(
+                user["user_id"],
+                msg_text,
+                reply_markup=kb,
+                parse_mode="HTML"
+            )
+
+            # 2. ЗАКРЕПЛЯЕМ СООБЩЕНИЕ (Добавьте эту строку!)
+            await bot.pin_chat_message(chat_id=sent_msg.chat.id, message_id=sent_msg.message_id)
+
+            # 3. Регистрируем для обновления кнопок
+            active_poll_messages[(sent_msg.chat.id, sent_msg.message_id)] = poll["id"]
+        except Exception as e:
+            print(f"Ошибка при отправке/закрепе для {user['user_id']}: {e}")
+            pass
+
     # 1. Завершаем состояние админа
     await state.clear()
     await callback.message.edit_text(text.POLL_CREATED, reply_markup=ctrl.back_to_admin_kb())
