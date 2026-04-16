@@ -462,6 +462,3 @@ async def cb_close_poll_confirm(callback: CallbackQuery, bot: Bot):
     else:
         await callback.message.edit_text("❌ Опрос уже был закрыт.")
 
-    # Возврат в админку через 2 секунды (опционально)
-    await asyncio.sleep(2)
-    await cmd_admin(callback.message, None)  # Вызов функции админки
