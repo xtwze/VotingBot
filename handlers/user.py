@@ -3,7 +3,7 @@ import time
 from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, FSInputFile
 
 import db
 import text
@@ -42,13 +42,20 @@ async def cmd_start(message: Message, bot: Bot):
         await message.answer(text.BLOCKED_USER)
         return
 
-    # Сохраняем юзера
+    # Сохраняем/обновляем юзера в базе
     await db.upsert_user(user_id, username)
 
-    # Приветствие
-    await message.answer(text.WELCOME, parse_mode="HTML")
+    # Путь к фото (лежит в корне проекта)
+    photo = FSInputFile("Cover.jpeg")
 
-    # ВЫЗОВ ОТПРАВКИ ОПРОСА
+    # Отправляем ФОТО с приветственным текстом в подписи (caption)
+    await message.answer_photo(
+        photo=photo,
+        caption=text.WELCOME,
+        parse_mode="HTML"
+    )
+
+    # Вызов отправки опроса (вторым сообщением)
     await send_active_poll(message, bot)
 
 @router.message(CommandStart())
