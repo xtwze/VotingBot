@@ -14,3 +14,7 @@ class VoteConfirm(StatesGroup):
 class Broadcast(StatesGroup):
     waiting_text = State()
     confirming = State()
+
+
+class CaptchaState(StatesGroup):
+    waiting_answer = State()
