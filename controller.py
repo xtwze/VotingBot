@@ -12,6 +12,10 @@ def admin_panel_kb() -> InlineKeyboardMarkup:
     builder.button(text="👥 Список голосующих",   callback_data="admin:voters:0")
     builder.button(text="📢 Рассылка",            callback_data="admin:broadcast")
     builder.button(text="🏁 Завершить текущий опрос", callback_data="admin:close_poll_check")
+    builder.button(
+        text="📘 Руководство",
+        url="https://telegra.ph/Rukovodstvo-administratora-Bot-POSLEDSTVIYA-FEST-04-17"
+    )
     builder.adjust(1)
     return builder.as_markup()
 
