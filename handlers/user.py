@@ -106,6 +106,7 @@ async def cb_vote_choose(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("vote_confirm:"))
 async def cb_vote_confirm(callback: CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
+
     if await db.is_blocked(user_id):
         await callback.answer(text.BLOCKED_USER, show_alert=True)
         return
@@ -177,7 +178,7 @@ async def process_captcha_answer(message: Message, state: FSMContext, bot: Bot):
             except: pass
     else:
         # Если неверно
-        await message.answer("❌ Неверно. Попробуйте проголосовать еще раз через меню.", delete_after=5)
+        await message.answer(f"❌ Неверно. Вы не смогли решить задачу от xtwze! Попробуйте проголосовать еще раз через меню.\n/start", delete_after=5)
         await state.clear()
 
 # --- Возврат к списку вариантов (кнопка "Нет/Назад") ---
