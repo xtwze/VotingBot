@@ -1,6 +1,8 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from config import CHANNEL_ID
+
 VOTERS_PAGE_SIZE = 10
 
 
@@ -130,4 +132,12 @@ def cancel_broadcast_kb() -> InlineKeyboardMarkup:
 def cancel_creation_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="🔙 Отмена (Назад)", callback_data="admin:back")
+    return builder.as_markup()
+
+
+def subscribe_check_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Я подписался", callback_data="check_subscription")
+    builder.button(text="📢 Перейти в канал", url=f"https://t.me/{CHANNEL_ID.lstrip('@')}")
+    builder.adjust(1)
     return builder.as_markup()

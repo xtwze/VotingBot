@@ -4,11 +4,13 @@ from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, FSInputFile
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import db
 import text
 import controller as ctrl
-from utils import generate_captcha
+from config import CHANNEL_ID
+from utils import generate_captcha, is_subscribed_to_channel
 from states import CaptchaState
 
 router = Router()
@@ -44,20 +46,39 @@ async def cmd_start(message: Message, bot: Bot):
         await message.answer(text.BLOCKED_USER)
         return
 
-    # Сохраняем/обновляем юзера в базе
+    # Сохраняем пользователя в БД
     await db.upsert_user(user_id, username)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Подписаться на канал 🚀", url=f"https://t.me/{CHANNEL_ID.lstrip('@')}"),
+    builder.button(text="Я теперь подписчек 🤓", callback_data="check_subscription")
+    builder.adjust(1)
+    # === ПРОВЕРКА ПОДПИСКИ ===
+    if not await is_subscribed_to_channel(bot, user_id):
+        # Отправляем фото + текст с просьбой подписаться
+        try:
+            photo = FSInputFile("Cover.jpeg")
+            await message.answer_photo(
+                photo=photo,
+                caption=text.SUBSCRIBE_TEXT,
+                parse_mode="HTML", reply_markup=builder.as_markup()
+            )
+        except Exception:
+            # Если фото нет — просто текст
+            await message.answer(text.SUBSCRIBE_TEXT, parse_mode="HTML")
+        return
 
-    # Путь к фото (лежит в корне проекта)
-    photo = FSInputFile("Cover.jpeg")
+    # Если подписан — отправляем приветствие + опрос
+    try:
+        photo = FSInputFile("Cover.jpeg")
+        await message.answer_photo(
+            photo=photo,
+            caption=text.WELCOME,
+            parse_mode="HTML"
+        )
+    except Exception:
+        await message.answer(text.WELCOME, parse_mode="HTML")
 
-    # Отправляем ФОТО с приветственным текстом в подписи (caption)
-    await message.answer_photo(
-        photo=photo,
-        caption=text.WELCOME,
-        parse_mode="HTML"
-    )
-
-    # Вызов отправки опроса (вторым сообщением)
+    # Отправляем активный опрос
     await send_active_poll(message, bot)
 
 @router.message(CommandStart())
@@ -238,6 +259,14 @@ async def cb_poll_refresh(callback: CallbackQuery, state: FSMContext):
         else:
             await callback.answer()
 
+
+@router.callback_query(F.data == "check_subscription")
+async def cb_check_subscription(callback: CallbackQuery, bot: Bot):
+    if await is_subscribed_to_channel(bot, callback.from_user.id):
+        await callback.answer("✅ Подписка подтверждена!")
+        await send_active_poll(callback.message, bot)  # или отправь новое сообщение
+    else:
+        await callback.answer("Ты ещё не подписан на канал брооо", show_alert=True)
 
 
 @router.message(Command("myid"))

@@ -1,6 +1,11 @@
 # Создайте новый файл или добавьте в начало user.py
 import random
 
+from aiogram import Bot
+from aiogram.types import ChatMember
+
+from config import CHANNEL_ID
+
 # Словарный запас символов-двойников для обхода простых парсеров
 NUM_WORDS = {
     0: "нοль",      # ο - греческая омикрон
@@ -42,3 +47,21 @@ def generate_captcha():
 
     question = f"Сколько будет: {word_a} {op_text} {word_b} ? (ответ пришлите цифрой)🤓"
     return question, answer
+
+
+async def is_subscribed_to_channel(bot: Bot, user_id: int) -> bool:
+    """Проверяет, состоит ли пользователь в канале"""
+    try:
+        member: ChatMember = await bot.get_chat_member(CHANNEL_ID, user_id)
+
+        # Статусы, при которых считаем подписанным:
+        # member, administrator, creator, restricted (если не забанен)
+        if member.status in ["member", "administrator", "creator"]:
+            return True
+        # Если restricted — проверяем, не забанен ли
+        if member.status == "restricted" and not member.is_member:
+            return False
+        return False
+    except Exception:
+        # Пользователь не найден в канале, бот не админ, канал приватный и т.д.
+        return False
