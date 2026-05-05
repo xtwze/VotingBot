@@ -454,7 +454,7 @@ async def cb_close_poll_confirm(callback: CallbackQuery, bot: Bot):
         users = await db.get_all_users()
         for u in users:
             try:
-                await bot.send_message(u["user_id"], f"📊 <b>Опрос завершен!</b>\n\n{res_text}", parse_mode="HTML")
+                await bot.send_message(u["user_id"], f" 🏁<b>Опрос завершен!</b>\n\n{res_text}", parse_mode="HTML")
             except:
                 continue
 

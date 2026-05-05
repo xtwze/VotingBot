@@ -148,18 +148,18 @@ async def cb_vote_confirm(callback: CallbackQuery, state: FSMContext):
 
     # Редактируем сообщение, просим решить пример
     await callback.message.edit_text(
-        f"🤖<b>Проверка на человека</b>\n\n{question}",
+        f"🤖<b>Проверка на человека</b>\nРешите задачку от @xtwzemode 🤓\n\n{question}",
         parse_mode="HTML"
     )
     await callback.answer()
 
-# Добавляем обработчик ответа на капчу
+
 @router.message(CaptchaState.waiting_answer)
 async def process_captcha_answer(message: Message, state: FSMContext, bot: Bot):
     # Сразу удаляем сообщение пользователя, чтобы не засорять чат
     try:
         await message.delete()
-    except:
+    except Exception:
         pass
 
     data = await state.get_data()
@@ -167,39 +167,58 @@ async def process_captcha_answer(message: Message, state: FSMContext, bot: Bot):
 
     # Проверяем, ввел ли пользователь число и совпадает ли оно
     if message.text and message.text.isdigit() and int(message.text) == correct_answer:
-        # --- КОД ИЗ ВАШЕГО СТАРОГО cb_vote_confirm ---
         poll_id = data.get("pending_poll_id")
         option_id = data.get("pending_option_id")
         user_id = message.from_user.id
         username = message.from_user.username
 
+        # Засчитываем голос в БД
         await db.cast_vote(poll_id, option_id, user_id)
 
+        # Получаем обновленные данные опроса
         poll = await db.get_active_poll()
         options = await db.get_poll_options(poll_id)
 
-        # Обновляем сообщение (нужно найти старое сообщение с капчей и отредактировать его)
-        # Так как мы удаляем сообщение юзера, нам нужно отредактировать последнее сообщение бота
-        # Но проще отправить новое или использовать сохраненный message_id
-
+        # Формируем сообщение об успехе и обновленный список
         new_text = f"<b>{text.VOTE_ACCEPTED}</b>\n\n" + text.poll_message(poll["title"], options)
         kb = ctrl.poll_options_kb(poll_id, options)
 
-        # Отправляем новое сообщение, так как старое сообщение с кнопками было заменено текстом капчи
+        # Отправляем новое сообщение (так как старое было заменено текстом капчи)
         await message.answer(new_text, reply_markup=kb, parse_mode="HTML")
         await state.clear()
 
-        # Уведомление админам
+        # --- УВЕДОМЛЕНИЕ АДМИНИСТРАТОРОВ ---
         from config import ADMIN_IDS
+
+        # 1. Собираем всех админов: из конфига и из базы данных
+        static_admins = set(ADMIN_IDS)
+        db_admins = await db.get_admins()
+        all_admins = static_admins.union(db_admins)  # Объединяем, чтобы не было дублей
+
+        # 2. Подготовка данных для уведомления
         option_name = next((o["name"] for o in options if o["id"] == option_id), "—")
         notify_text = text.admin_vote_notify(username, user_id, option_name, poll["title"])
         admin_kb = ctrl.delete_vote_kb(poll_id, user_id)
-        for admin_id in ADMIN_IDS:
-            try: await bot.send_message(admin_id, notify_text, reply_markup=admin_kb, parse_mode="HTML")
-            except: pass
+
+        # 3. Рассылка уведомлений всем найденным админам
+        for admin_id in all_admins:
+            try:
+                await bot.send_message(
+                    admin_id,
+                    notify_text,
+                    reply_markup=admin_kb,
+                    parse_mode="HTML"
+                )
+            except Exception:
+                # Игнорируем ошибки, если кто-то из админов заблокировал бота
+                pass
     else:
-        # Если неверно
-        await message.answer(f"❌ Неверно. Вы не смогли решить задачу от xtwze! Попробуйте проголосовать еще раз через меню.\n/start", delete_after=5)
+        # Если ответ на капчу неверный
+        await message.answer(
+            f"❌ Неверно. Вы не смогли решить задачу от xtwze! "
+            f"Попробуйте проголосовать еще раз через меню.\n/start",
+            delete_after=5
+        )
         await state.clear()
 
 # --- Возврат к списку вариантов (кнопка "Нет/Назад") ---

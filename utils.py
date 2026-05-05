@@ -4,7 +4,7 @@ import random
 from aiogram import Bot
 from aiogram.types import ChatMember
 
-from config import CHANNEL_ID
+from config import CHANNEL_ID, ADMIN_IDS
 
 # Словарный запас символов-двойников для обхода простых парсеров
 NUM_WORDS = {
@@ -45,7 +45,7 @@ def generate_captcha():
     op_text = "nлюc" if operation == "+" else "muнyc"
     op_text = obfuscate(op_text)
 
-    question = f"Сколько будет: {word_a} {op_text} {word_b} ? (ответ пришлите цифрой)🤓"
+    question = f"Сколько будет: {word_a} {op_text} {word_b} ? (ответ пришлите цифрой)"
     return question, answer
 
 
