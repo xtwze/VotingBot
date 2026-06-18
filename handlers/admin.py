@@ -1,9 +1,9 @@
 import asyncio
-
+from aiogram import F
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InputMediaPhoto
 
 import db
 import text
@@ -52,12 +52,15 @@ async def cb_admin_back(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "broadcast:edit", Broadcast.confirming)
 async def cb_broadcast_edit(callback: CallbackQuery, state: FSMContext):
     await state.set_state(Broadcast.waiting_text)
-    await callback.message.edit_text(
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await callback.message.answer(
         text.ASK_BROADCAST_TEXT,
-        reply_markup=ctrl.cancel_broadcast_kb(), # Добавляем и сюда
+        reply_markup=ctrl.broadcast_compose_kb(),
         parse_mode="HTML"
     )
-    await callback.answer()
     await callback.answer()
 
 
@@ -271,38 +274,184 @@ async def cb_broadcast(callback: CallbackQuery, state: FSMContext):
     if not await is_admin(callback.from_user.id):
         return
 
+    await state.update_data(text=None, photos=[], caption_entities=None)
     await state.set_state(Broadcast.waiting_text)
-    # Добавляем кнопку назад к сообщению с просьбой ввести текст
     await callback.message.edit_text(
         text.ASK_BROADCAST_TEXT,
-        reply_markup=ctrl.cancel_broadcast_kb(),  # Используем новую клавиатуру
+        reply_markup=ctrl.broadcast_compose_kb(),
         parse_mode="HTML"
     )
     await callback.answer()
 
 
+@router.message(Broadcast.waiting_text, F.media_group_id)
+async def process_broadcast_album(message: Message, state: FSMContext):
+    """Обработка альбома (несколько фото одним сообщением)"""
+    data = await state.get_data()
+    photos: list[str] = data.get("photos") or []
+
+    if len(photos) >= text.MAX_BROADCAST_PHOTOS:
+        await message.answer(text.BROADCAST_PHOTO_LIMIT)
+        return
+
+    # Добавляем фото (в альбоме message.photo содержит текущее фото)
+    photo_id = message.photo[-1].file_id
+    if photo_id not in photos:
+        photos.append(photo_id)
+
+    current_text = data.get("text")
+    update_payload = {"photos": photos}
+
+    # Берём подпись из первого сообщения альбома
+    if message.caption and not current_text:
+        current_text = message.caption
+        update_payload["text"] = current_text
+        update_payload["caption_entities"] = message.caption_entities
+
+    await state.update_data(**update_payload)
+
+    # Чтобы не спамить уведомлениями на каждый файл альбома — отвечаем только один раз
+    if message.media_group_id and len(photos) == 1:  # первое фото в группе
+        await message.answer(
+            text.broadcast_status(current_text, len(photos)),
+            reply_markup=ctrl.broadcast_compose_kb(),
+            parse_mode="HTML"
+        )
+    await message.answer("📸 Фото добавлено в альбом")
 
 
-@router.message(Broadcast.waiting_text)
-async def process_broadcast(message: Message, state: FSMContext):
-    await state.update_data(text=message.text)
+@router.message(Broadcast.waiting_text, F.photo)
+async def process_broadcast_photo(message: Message, state: FSMContext):
+    """Одиночное фото"""
+    data = await state.get_data()
+    photos: list[str] = data.get("photos") or []
+
+    if len(photos) >= text.MAX_BROADCAST_PHOTOS:
+        await message.answer(
+            text.BROADCAST_PHOTO_LIMIT,
+            reply_markup=ctrl.broadcast_compose_kb()
+        )
+        return
+
+    photos.append(message.photo[-1].file_id)
+
+    current_text = data.get("text")
+    update_payload = {"photos": photos}
+
+    if message.caption and not current_text:
+        current_text = message.caption
+        update_payload["text"] = current_text
+        update_payload["caption_entities"] = message.caption_entities
+
+    await state.update_data(**update_payload)
+
+    await message.answer(
+        text.broadcast_status(current_text, len(photos)),
+        reply_markup=ctrl.broadcast_compose_kb(),
+        parse_mode="HTML"
+    )
+
+
+@router.message(Broadcast.waiting_text, F.text)
+async def process_broadcast_text(message: Message, state: FSMContext):
+    await state.update_data(
+        text=message.text,
+        caption_entities=message.entities
+    )
+    data = await state.get_data()
+    photos = data.get("photos") or []
+
+    await message.answer(
+        text.broadcast_status(message.text, len(photos)),
+        reply_markup=ctrl.broadcast_compose_kb(),
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data == "broadcast:done", Broadcast.waiting_text)
+async def cb_broadcast_done(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    broadcast_text = data.get("text")
+    photos: list[str] = data.get("photos") or []
+    caption_entities = data.get("caption_entities")
+
+    if not broadcast_text and not photos:
+        await callback.answer(text.BROADCAST_EMPTY, show_alert=True)
+        return
+
     await state.set_state(Broadcast.confirming)
-    await message.answer(f"Предпросмотр:\n\n{message.text}", reply_markup=ctrl.broadcast_confirm_kb())
+
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    # Предпросмотр с сохранением форматирования
+    if not photos:
+        await callback.message.answer(broadcast_text, entities=caption_entities)
+    elif len(photos) == 1:
+        await callback.message.answer_photo(
+            photos[0],
+            caption=broadcast_text,
+            caption_entities=caption_entities
+        )
+    else:
+        media = [InputMediaPhoto(media=p) for p in photos]
+        if broadcast_text:
+            media[0].caption = broadcast_text
+            media[0].caption_entities = caption_entities
+        await callback.message.answer_media_group(media)
+
+    await callback.message.answer(
+        text.BROADCAST_PREVIEW,
+        reply_markup=ctrl.broadcast_confirm_kb(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
 
 
 @router.callback_query(F.data == "broadcast:confirm", Broadcast.confirming)
 async def cb_broadcast_send(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
+    broadcast_text = data.get("text")
+    photos: list[str] = data.get("photos") or []
+    caption_entities = data.get("caption_entities")
+
     users = await db.get_all_users()
     count = 0
+
     for u in users:
         try:
-            await callback.bot.send_message(u["user_id"], data["text"])
+            if not photos:
+                await callback.bot.send_message(
+                    u["user_id"],
+                    broadcast_text,
+                    entities=caption_entities
+                )
+            elif len(photos) == 1:
+                await callback.bot.send_photo(
+                    u["user_id"],
+                    photos[0],
+                    caption=broadcast_text,
+                    caption_entities=caption_entities
+                )
+            else:
+                media = [InputMediaPhoto(media=p) for p in photos]
+                if broadcast_text:
+                    media[0].caption = broadcast_text
+                    media[0].caption_entities = caption_entities
+                await callback.bot.send_media_group(u["user_id"], media)
             count += 1
-        except:
+        except Exception:
             pass
+
     await state.clear()
-    await callback.message.edit_text(f"✅ Рассылка завершена. Получили: {count}")
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await callback.message.answer(f"✅ Рассылка завершена. Получили: {count}")
+    await callback.answer()
 
 
 
@@ -461,4 +610,3 @@ async def cb_close_poll_confirm(callback: CallbackQuery, bot: Bot):
         await callback.message.edit_text("✅ Опрос успешно закрыт, итоги разосланы.")
     else:
         await callback.message.edit_text("❌ Опрос уже был закрыт.")
-

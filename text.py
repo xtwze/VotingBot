@@ -1,4 +1,4 @@
-# ── Общие ──────────────────────────────────────────────────────────────────
+from __future__ import annotations
 from config import CHANNEL_ID
 
 WELCOME = (
@@ -6,6 +6,7 @@ WELCOME = (
     "Здесь ты можешь проголосовать за своего любимого артиста.\n\n"
     "Кто будет выступать на фестивале - зависит от тебя!"
 )
+MAX_BROADCAST_PHOTOS = 10
 
 NO_ACTIVE_POLL = "📭 Сейчас нет активных голосований. Загляни позже!"
 
@@ -89,11 +90,33 @@ VOTE_NOT_FOUND = "❌ Голос не найден."
 USER_NOT_FOUND = "❌ Пользователь не найден."
 
 
+MAX_BROADCAST_PHOTOS = 10
+
 # Рассылка
-ASK_BROADCAST_TEXT = "✍️ Напишите сообщение для рассылки:"
+ASK_BROADCAST_TEXT = (
+    "✍️ Отправьте текст и/или фото (до 10 шт.) для рассылки.\n\n"
+    "Можно прислать текст, одно фото с подписью, несколько фото по очереди "
+    "(или альбомом) — всё это соберётся в одну рассылку.\n"
+    "Когда всё готово — нажмите «✅ Готово»."
+)
 BROADCAST_PREVIEW = "👁 <b>Предпросмотр сообщения:</b>\n\nПодтвердить рассылку?"
 BROADCAST_SENT = "📨 Рассылка выполнена!"
 BROADCAST_CANCELLED = "↩️ Рассылка отменена."
+BROADCAST_PHOTO_LIMIT = "⚠️ Достигнут лимит — максимум 10 фото в одной рассылке."
+BROADCAST_EMPTY = "⚠️ Добавьте текст или хотя бы одно фото перед отправкой."
+
+
+def broadcast_status(text_value: str | None, photos_count: int, limit: int = MAX_BROADCAST_PHOTOS) -> str:
+    lines = ["📦 <b>Черновик рассылки</b>\n"]
+
+    if text_value:
+        lines.append(f"<b>Текст:</b>\n{text_value}\n")
+    else:
+        lines.append("Текст: — не задан\n")
+
+    lines.append(f"Фото: {photos_count}/{limit}")
+    lines.append("\nМожете добавить ещё текст/фото или нажать «✅ Готово».")
+    return "\n".join(lines)
 
 # ── Ошибки ────────────────────────────────────────────────────────────────────
 NOT_ADMIN = "🚫 У вас нет доступа к этой команде."

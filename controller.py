@@ -129,6 +129,14 @@ def cancel_broadcast_kb() -> InlineKeyboardMarkup:
     builder.button(text="🔙 Отмена", callback_data="admin:back")
     return builder.as_markup()
 
+
+def broadcast_compose_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Готово", callback_data="broadcast:done")
+    builder.button(text="❌ Отмена", callback_data="admin:back")
+    builder.adjust(2)
+    return builder.as_markup()
+
 def cancel_creation_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="🔙 Отмена (Назад)", callback_data="admin:back")
