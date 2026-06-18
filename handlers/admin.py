@@ -437,14 +437,29 @@ async def cb_broadcast_done(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "broadcast:confirm", Broadcast.confirming)
 async def cb_broadcast_send(callback: CallbackQuery, state: FSMContext):
+    # Сразу убираем кнопки и показываем, что процесс пошёл
+    try:
+        await callback.message.edit_text(
+            "⏳ <b>Рассылка запущена...</b>\n\n"
+            "Пожалуйста, подождите :)",
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+
+    await callback.answer("Рассылка началась", show_alert=False)
+
     data = await state.get_data()
     broadcast_text = data.get("text")
     photos: list[str] = data.get("photos") or []
     caption_entities = data.get("caption_entities")
 
     users = await db.get_all_users()
+    total_users = len(users)
     count = 0
+    errors = 0
 
+    # --- Сама рассылка ---
     for u in users:
         try:
             if not photos:
@@ -466,16 +481,30 @@ async def cb_broadcast_send(callback: CallbackQuery, state: FSMContext):
                     media[0].caption = broadcast_text
                     media[0].caption_entities = caption_entities
                 await callback.bot.send_media_group(u["user_id"], media)
+
             count += 1
+
+            # Небольшая задержка, чтобы не попасть под лимиты Telegram
+            await asyncio.sleep(0.045)  # ~28-30 сообщений в секунду
+
         except Exception:
-            pass
+            errors += 1
+            # Пропускаем заблокированных и т.д.
+
+    # --- Финальное сообщение ---
+    result_text = (
+        f"✅ <b>Рассылка завершена!</b>\n\n"
+        f"✅ Успешно доставлено: <b>{count}</b> из {total_users}\n"
+        f"❌ Ошибок: {errors}"
+    )
+
+    try:
+        await callback.message.edit_text(result_text, parse_mode="HTML")
+    except Exception:
+        # Если не получилось отредактировать — отправляем новое
+        await callback.message.answer(result_text, parse_mode="HTML")
 
     await state.clear()
-    try:
-        await callback.message.edit_reply_markup(reply_markup=None)
-    except Exception:
-        pass
-    await callback.message.answer(f"✅ Рассылка завершена. Получили: {count}")
     await callback.answer()
 
 
