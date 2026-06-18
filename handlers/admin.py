@@ -29,8 +29,22 @@ async def cmd_admin(message: Message, state: FSMContext):
     if not await is_admin(message.from_user.id):
         await message.answer(text.NOT_ADMIN)
         return
+
     await state.clear()
-    await message.answer(text.ADMIN_PANEL, reply_markup=ctrl.admin_panel_kb(), parse_mode="HTML")
+
+    # Получаем статистику
+    total_users = await db.get_total_users()
+    active_users = await db.get_active_users()
+    voted_current = await db.get_voted_in_current_poll()
+
+    # Формируем текст с подставленными значениями
+    panel_text = text.ADMIN_PANEL.format(
+        total_users=total_users,
+        active_users=active_users,
+        voted_current=voted_current
+    )
+
+    await message.answer(panel_text, reply_markup=ctrl.admin_panel_kb(), parse_mode="HTML")
 
 
 # ── Возврат в админ-панель ────────────────────────────────────────────────────────
@@ -40,9 +54,20 @@ async def cb_admin_back(callback: CallbackQuery, state: FSMContext):
     if not await is_admin(callback.from_user.id):
         return
 
-    await state.clear()  # Сбрасываем состояния, если админ был в процессе создания опроса или рассылки
+    await state.clear()
+
+    total_users = await db.get_total_users()
+    active_users = await db.get_active_users()
+    voted_current = await db.get_voted_in_current_poll()
+
+    panel_text = text.ADMIN_PANEL.format(
+        total_users=total_users,
+        active_users=active_users,
+        voted_current=voted_current
+    )
+
     await callback.message.edit_text(
-        text.ADMIN_PANEL,
+        panel_text,
         reply_markup=ctrl.admin_panel_kb(),
         parse_mode="HTML"
     )

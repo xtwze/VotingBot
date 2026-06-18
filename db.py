@@ -280,7 +280,35 @@ async def get_admins() -> list[int]:
         async with db.execute("SELECT user_id FROM admins") as cur:
             rows = await cur.fetchall()
             return [r[0] for r in rows]
+# ── Статистика ───────────────────────────────────────────────────────────────
 
+async def get_total_users() -> int:
+    """Общее количество пользователей в базе (включая заблокированных)"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM users") as cur:
+            row = await cur.fetchone()
+            return row[0] if row else 0
+
+
+async def get_active_users() -> int:
+    """Количество активных (незаблокированных) пользователей"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM users WHERE is_blocked = 0") as cur:
+            row = await cur.fetchone()
+            return row[0] if row else 0
+
+
+async def get_voted_in_current_poll() -> int:
+    """Количество проголосовавших в активном опросе"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT COUNT(DISTINCT user_id) 
+            FROM votes v
+            JOIN polls p ON v.poll_id = p.id
+            WHERE p.is_active = 1
+        """) as cur:
+            row = await cur.fetchone()
+            return row[0] if row else 0
 
 async def close_poll(poll_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
