@@ -10,6 +10,7 @@ import text
 import controller as ctrl
 from config import ADMIN_IDS
 from states import CreatePoll, Broadcast
+from urllib.parse import urlparse
 
 router = Router()
 
@@ -81,9 +82,10 @@ async def cb_broadcast_edit(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_reply_markup(reply_markup=None)
     except Exception:
         pass
+    data = await state.get_data()
     await callback.message.answer(
         text.ASK_BROADCAST_TEXT,
-        reply_markup=ctrl.broadcast_compose_kb(),
+        reply_markup=ctrl.broadcast_compose_kb(has_button=bool(data.get("btn_url"))),
         parse_mode="HTML"
     )
     await callback.answer()
@@ -299,11 +301,11 @@ async def cb_broadcast(callback: CallbackQuery, state: FSMContext):
     if not await is_admin(callback.from_user.id):
         return
 
-    await state.update_data(text=None, photos=[], caption_entities=None)
+    await state.update_data(text=None, photos=[], caption_entities=None, btn_text=None, btn_url=None)
     await state.set_state(Broadcast.waiting_text)
     await callback.message.edit_text(
         text.ASK_BROADCAST_TEXT,
-        reply_markup=ctrl.broadcast_compose_kb(),
+        reply_markup=ctrl.broadcast_compose_kb(has_button=False),
         parse_mode="HTML"
     )
     await callback.answer()
@@ -337,9 +339,10 @@ async def process_broadcast_album(message: Message, state: FSMContext):
 
     # Чтобы не спамить уведомлениями на каждый файл альбома — отвечаем только один раз
     if message.media_group_id and len(photos) == 1:  # первое фото в группе
+        data = await state.get_data()
         await message.answer(
-            text.broadcast_status(current_text, len(photos)),
-            reply_markup=ctrl.broadcast_compose_kb(),
+            text.broadcast_status(current_text, len(photos), btn_text=data.get("btn_text"), btn_url=data.get("btn_url")),
+            reply_markup=ctrl.broadcast_compose_kb(has_button=bool(data.get("btn_url"))),
             parse_mode="HTML"
         )
     await message.answer("📸 Фото добавлено в альбом")
@@ -370,9 +373,10 @@ async def process_broadcast_photo(message: Message, state: FSMContext):
 
     await state.update_data(**update_payload)
 
+    data = await state.get_data()
     await message.answer(
-        text.broadcast_status(current_text, len(photos)),
-        reply_markup=ctrl.broadcast_compose_kb(),
+        text.broadcast_status(current_text, len(photos), btn_text=data.get("btn_text"), btn_url=data.get("btn_url")),
+        reply_markup=ctrl.broadcast_compose_kb(has_button=bool(data.get("btn_url"))),
         parse_mode="HTML"
     )
 
@@ -387,10 +391,83 @@ async def process_broadcast_text(message: Message, state: FSMContext):
     photos = data.get("photos") or []
 
     await message.answer(
-        text.broadcast_status(message.text, len(photos)),
-        reply_markup=ctrl.broadcast_compose_kb(),
+        text.broadcast_status(message.text, len(photos), btn_text=data.get("btn_text"), btn_url=data.get("btn_url")),
+        reply_markup=ctrl.broadcast_compose_kb(has_button=bool(data.get("btn_url"))),
         parse_mode="HTML"
     )
+
+
+@router.callback_query(F.data == "broadcast:add_button", Broadcast.waiting_text)
+async def cb_broadcast_add_button(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(Broadcast.waiting_button_text)
+    await callback.message.answer(
+        text.ASK_BUTTON_TEXT,
+        reply_markup=ctrl.cancel_button_input_kb(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.message(Broadcast.waiting_button_text, F.text)
+async def process_button_text(message: Message, state: FSMContext):
+    await state.update_data(btn_text=message.text.strip())
+    await state.set_state(Broadcast.waiting_button_url)
+    await message.answer(
+        text.ASK_BUTTON_URL,
+        reply_markup=ctrl.cancel_button_input_kb(),
+        parse_mode="HTML"
+    )
+
+
+@router.message(Broadcast.waiting_button_url, F.text)
+async def process_button_url(message: Message, state: FSMContext):
+    url = message.text.strip()
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        await message.answer(text.BUTTON_INVALID_URL, parse_mode="HTML")
+        return
+
+    await state.update_data(btn_url=url)
+    await state.set_state(Broadcast.waiting_text)
+
+    data = await state.get_data()
+    photos = data.get("photos") or []
+    await message.answer(
+        text.BUTTON_ADDED + "\n\n" + text.broadcast_status(
+            data.get("text"), len(photos), btn_text=data.get("btn_text"), btn_url=url
+        ),
+        reply_markup=ctrl.broadcast_compose_kb(has_button=True),
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data == "broadcast:remove_button", Broadcast.waiting_text)
+async def cb_broadcast_remove_button(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(btn_text=None, btn_url=None)
+    data = await state.get_data()
+    photos = data.get("photos") or []
+    await callback.message.answer(
+        text.BUTTON_REMOVED + "\n\n" + text.broadcast_status(data.get("text"), len(photos)),
+        reply_markup=ctrl.broadcast_compose_kb(has_button=False),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "broadcast:cancel_button")
+async def cb_broadcast_cancel_button(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(Broadcast.waiting_text)
+    data = await state.get_data()
+    photos = data.get("photos") or []
+    await callback.message.answer(
+        text.broadcast_status(
+            data.get("text"), len(photos),
+            btn_text=data.get("btn_text"), btn_url=data.get("btn_url")
+        ),
+        reply_markup=ctrl.broadcast_compose_kb(has_button=bool(data.get("btn_url"))),
+        parse_mode="HTML"
+    )
+    await callback.answer()
 
 
 @router.callback_query(F.data == "broadcast:done", Broadcast.waiting_text)
@@ -399,6 +476,8 @@ async def cb_broadcast_done(callback: CallbackQuery, state: FSMContext):
     broadcast_text = data.get("text")
     photos: list[str] = data.get("photos") or []
     caption_entities = data.get("caption_entities")
+    btn_text = data.get("btn_text")
+    btn_url = data.get("btn_url")
 
     if not broadcast_text and not photos:
         await callback.answer(text.BROADCAST_EMPTY, show_alert=True)
@@ -411,14 +490,18 @@ async def cb_broadcast_done(callback: CallbackQuery, state: FSMContext):
     except Exception:
         pass
 
+    # Клавиатура поста (если задана кнопка)
+    post_kb = ctrl.broadcast_post_button_kb(btn_text, btn_url) if btn_text and btn_url else None
+
     # Предпросмотр с сохранением форматирования
     if not photos:
-        await callback.message.answer(broadcast_text, entities=caption_entities)
+        await callback.message.answer(broadcast_text, entities=caption_entities, reply_markup=post_kb)
     elif len(photos) == 1:
         await callback.message.answer_photo(
             photos[0],
             caption=broadcast_text,
-            caption_entities=caption_entities
+            caption_entities=caption_entities,
+            reply_markup=post_kb
         )
     else:
         media = [InputMediaPhoto(media=p) for p in photos]
@@ -426,6 +509,9 @@ async def cb_broadcast_done(callback: CallbackQuery, state: FSMContext):
             media[0].caption = broadcast_text
             media[0].caption_entities = caption_entities
         await callback.message.answer_media_group(media)
+        # Для альбома кнопку прикрепляем отдельным сообщением в предпросмотре
+        if post_kb:
+            await callback.message.answer("☝️ К посту будет прикреплена кнопка выше.", reply_markup=post_kb)
 
     await callback.message.answer(
         text.BROADCAST_PREVIEW,
@@ -453,6 +539,9 @@ async def cb_broadcast_send(callback: CallbackQuery, state: FSMContext):
     broadcast_text = data.get("text")
     photos: list[str] = data.get("photos") or []
     caption_entities = data.get("caption_entities")
+    btn_text = data.get("btn_text")
+    btn_url = data.get("btn_url")
+    post_kb = ctrl.broadcast_post_button_kb(btn_text, btn_url) if btn_text and btn_url else None
 
     users = await db.get_all_users()
     total_users = len(users)
@@ -466,14 +555,16 @@ async def cb_broadcast_send(callback: CallbackQuery, state: FSMContext):
                 await callback.bot.send_message(
                     u["user_id"],
                     broadcast_text,
-                    entities=caption_entities
+                    entities=caption_entities,
+                    reply_markup=post_kb
                 )
             elif len(photos) == 1:
                 await callback.bot.send_photo(
                     u["user_id"],
                     photos[0],
                     caption=broadcast_text,
-                    caption_entities=caption_entities
+                    caption_entities=caption_entities,
+                    reply_markup=post_kb
                 )
             else:
                 media = [InputMediaPhoto(media=p) for p in photos]
@@ -481,6 +572,8 @@ async def cb_broadcast_send(callback: CallbackQuery, state: FSMContext):
                     media[0].caption = broadcast_text
                     media[0].caption_entities = caption_entities
                 await callback.bot.send_media_group(u["user_id"], media)
+                if post_kb:
+                    await callback.bot.send_message(u["user_id"], "👇", reply_markup=post_kb)
 
             count += 1
 

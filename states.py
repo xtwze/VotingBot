@@ -13,6 +13,8 @@ class VoteConfirm(StatesGroup):
 
 class Broadcast(StatesGroup):
     waiting_text = State()
+    waiting_button_text = State()
+    waiting_button_url = State()
     confirming = State()
 
 

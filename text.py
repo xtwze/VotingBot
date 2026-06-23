@@ -109,8 +109,27 @@ BROADCAST_CANCELLED = "↩️ Рассылка отменена."
 BROADCAST_PHOTO_LIMIT = "⚠️ Достигнут лимит — максимум 10 фото в одной рассылке."
 BROADCAST_EMPTY = "⚠️ Добавьте текст или хотя бы одно фото перед отправкой."
 
+ASK_BUTTON_TEXT = (
+    "✏️ <b>Шаг 1/2: Текст кнопки</b>\n\n"
+    "Введите текст, который увидят пользователи на кнопке.\n"
+    "<i>Например: Перейти на сайт 🔗</i>"
+)
+ASK_BUTTON_URL = (
+    "🔗 <b>Шаг 2/2: Ссылка для кнопки</b>\n\n"
+    "Введите ссылку (должна начинаться с <code>https://</code> или <code>http://</code>)."
+)
+BUTTON_INVALID_URL = "❌ Некорректная ссылка. Убедитесь, что она начинается с <code>https://</code> или <code>http://</code> и попробуйте снова."
+BUTTON_ADDED = "✅ Кнопка добавлена!"
+BUTTON_REMOVED = "🗑 Кнопка удалена."
 
-def broadcast_status(text_value: str | None, photos_count: int, limit: int = MAX_BROADCAST_PHOTOS) -> str:
+
+def broadcast_status(
+    text_value: str | None,
+    photos_count: int,
+    limit: int = MAX_BROADCAST_PHOTOS,
+    btn_text: str | None = None,
+    btn_url: str | None = None,
+) -> str:
     lines = ["📦 <b>Черновик рассылки</b>\n"]
 
     if text_value:
@@ -119,6 +138,12 @@ def broadcast_status(text_value: str | None, photos_count: int, limit: int = MAX
         lines.append("Текст: — не задан\n")
 
     lines.append(f"Фото: {photos_count}/{limit}")
+
+    if btn_text and btn_url:
+        lines.append(f"\n🔗 <b>Кнопка:</b> «{btn_text}» → {btn_url}")
+    else:
+        lines.append("\n🔗 Кнопка: — не добавлена")
+
     lines.append("\nМожете добавить ещё текст/фото или нажать «✅ Готово».")
     return "\n".join(lines)
 

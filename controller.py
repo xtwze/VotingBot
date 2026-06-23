@@ -130,11 +130,29 @@ def cancel_broadcast_kb() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def broadcast_compose_kb() -> InlineKeyboardMarkup:
+def broadcast_compose_kb(has_button: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Готово", callback_data="broadcast:done")
+    if has_button:
+        builder.button(text="✏️ Изменить кнопку", callback_data="broadcast:add_button")
+        builder.button(text="🗑 Удалить кнопку", callback_data="broadcast:remove_button")
+    else:
+        builder.button(text="🔗 Добавить кнопку", callback_data="broadcast:add_button")
     builder.button(text="❌ Отмена", callback_data="admin:back")
-    builder.adjust(2)
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def cancel_button_input_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="↩️ Назад", callback_data="broadcast:cancel_button")
+    return builder.as_markup()
+
+
+def broadcast_post_button_kb(btn_text: str, btn_url: str) -> InlineKeyboardMarkup:
+    """Клавиатура, которая прикрепляется к самому посту рассылки."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text=btn_text, url=btn_url)
     return builder.as_markup()
 
 def cancel_creation_kb() -> InlineKeyboardMarkup:
