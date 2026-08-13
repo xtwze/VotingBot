@@ -6,8 +6,6 @@ WELCOME = (
     "Здесь ты можешь проголосовать за своего любимого артиста.\n\n"
     "Кто будет выступать на фестивале - зависит от тебя!"
 )
-MAX_BROADCAST_PHOTOS = 10
-
 NO_ACTIVE_POLL = "📭 Сейчас нет активных голосований. Загляни позже!"
 
 # ── Голосование (пользователь) ──────────────────────────────────────────────
@@ -94,20 +92,20 @@ VOTE_NOT_FOUND = "❌ Голос не найден."
 USER_NOT_FOUND = "❌ Пользователь не найден."
 
 
-MAX_BROADCAST_PHOTOS = 10
+MAX_BROADCAST_MEDIA = 10
 
 # Рассылка
 ASK_BROADCAST_TEXT = (
-    "✍️ Отправьте текст и/или фото (до 10 шт.) для рассылки.\n\n"
-    "Можно прислать текст, одно фото с подписью, несколько фото по очереди "
-    "(или альбомом) — всё это соберётся в одну рассылку.\n"
+    "✍️ Отправьте текст, фото и/или видео (до 10 медиафайлов) для рассылки.\n\n"
+    "Можно прислать текст, фото или видео с подписью, несколько медиафайлов "
+    "по очереди (или альбомом) — всё это соберётся в одну рассылку.\n"
     "Когда всё готово — нажмите «✅ Готово»."
 )
 BROADCAST_PREVIEW = "👁 <b>Предпросмотр сообщения:</b>\n\nПодтвердить рассылку?"
 BROADCAST_SENT = "📨 Рассылка выполнена!"
 BROADCAST_CANCELLED = "↩️ Рассылка отменена."
-BROADCAST_PHOTO_LIMIT = "⚠️ Достигнут лимит — максимум 10 фото в одной рассылке."
-BROADCAST_EMPTY = "⚠️ Добавьте текст или хотя бы одно фото перед отправкой."
+BROADCAST_MEDIA_LIMIT = "⚠️ Достигнут лимит — максимум 10 фото и видео в одной рассылке."
+BROADCAST_EMPTY = "⚠️ Добавьте текст, фото или видео перед отправкой."
 
 ASK_BUTTON_TEXT = (
     "✏️ <b>Шаг 1/2: Текст кнопки</b>\n\n"
@@ -125,8 +123,8 @@ BUTTON_REMOVED = "🗑 Кнопка удалена."
 
 def broadcast_status(
     text_value: str | None,
-    photos_count: int,
-    limit: int = MAX_BROADCAST_PHOTOS,
+    media: list[dict[str, str]],
+    limit: int = MAX_BROADCAST_MEDIA,
     btn_text: str | None = None,
     btn_url: str | None = None,
 ) -> str:
@@ -137,14 +135,16 @@ def broadcast_status(
     else:
         lines.append("Текст: — не задан\n")
 
-    lines.append(f"Фото: {photos_count}/{limit}")
+    photos_count = sum(item["type"] == "photo" for item in media)
+    videos_count = sum(item["type"] == "video" for item in media)
+    lines.append(f"Фото: {photos_count} | Видео: {videos_count} | Всего: {len(media)}/{limit}")
 
     if btn_text and btn_url:
         lines.append(f"\n🔗 <b>Кнопка:</b> «{btn_text}» → {btn_url}")
     else:
         lines.append("\n🔗 Кнопка: — не добавлена")
 
-    lines.append("\nМожете добавить ещё текст/фото или нажать «✅ Готово».")
+    lines.append("\nМожете добавить ещё текст, фото или видео либо нажать «✅ Готово».")
     return "\n".join(lines)
 
 # ── Ошибки ────────────────────────────────────────────────────────────────────

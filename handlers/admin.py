@@ -1,9 +1,13 @@
 import asyncio
+from collections.abc import Awaitable, Callable
+from typing import TypeVar
+
 from aiogram import F
 from aiogram import Router, F, Bot
+from aiogram.exceptions import TelegramForbiddenError, TelegramNetworkError, TelegramRetryAfter
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery, InputMediaPhoto
+from aiogram.types import Message, CallbackQuery, InputMediaPhoto, InputMediaVideo
 
 import db
 import text
@@ -13,6 +17,42 @@ from states import CreatePoll, Broadcast
 from urllib.parse import urlparse
 
 router = Router()
+
+BROADCAST_REQUEST_DELAY = 0.065  # не более ~15 запросов/с с безопасным запасом
+BROADCAST_MAX_ATTEMPTS = 3
+T = TypeVar("T")
+
+
+def build_broadcast_media(items: list[dict[str, str]]):
+    """Build a Telegram media group while preserving photo/video types."""
+    media_types = {
+        "photo": InputMediaPhoto,
+        "video": InputMediaVideo,
+    }
+    return [media_types[item["type"]](media=item["file_id"]) for item in items]
+
+
+async def send_broadcast_request(request: Callable[[], Awaitable[T]]) -> T:
+    """Отправить один API-запрос с ограничением скорости и повторами."""
+    for attempt in range(1, BROADCAST_MAX_ATTEMPTS + 1):
+        try:
+            result = await request()
+            return result
+        except TelegramRetryAfter as error:
+            if attempt == BROADCAST_MAX_ATTEMPTS:
+                raise
+            # Telegram сам сообщает, сколько нужно подождать после 429.
+            await asyncio.sleep(error.retry_after + 1)
+        except TelegramNetworkError:
+            if attempt == BROADCAST_MAX_ATTEMPTS:
+                raise
+            # Короткая возрастающая пауза при временной сетевой ошибке.
+            await asyncio.sleep(attempt)
+        finally:
+            # Ограничиваем все запросы, включая завершившиеся постоянной ошибкой.
+            await asyncio.sleep(BROADCAST_REQUEST_DELAY)
+
+    raise RuntimeError("Broadcast request attempts exhausted")
 
 
 async def is_admin(user_id: int) -> bool:
@@ -301,7 +341,7 @@ async def cb_broadcast(callback: CallbackQuery, state: FSMContext):
     if not await is_admin(callback.from_user.id):
         return
 
-    await state.update_data(text=None, photos=[], caption_entities=None, btn_text=None, btn_url=None)
+    await state.update_data(text=None, media=[], caption_entities=None, btn_text=None, btn_url=None)
     await state.set_state(Broadcast.waiting_text)
     await callback.message.edit_text(
         text.ASK_BROADCAST_TEXT,
@@ -313,21 +353,26 @@ async def cb_broadcast(callback: CallbackQuery, state: FSMContext):
 
 @router.message(Broadcast.waiting_text, F.media_group_id)
 async def process_broadcast_album(message: Message, state: FSMContext):
-    """Обработка альбома (несколько фото одним сообщением)"""
+    """Обработка альбома из фото и видео."""
     data = await state.get_data()
-    photos: list[str] = data.get("photos") or []
+    media: list[dict[str, str]] = data.get("media") or []
 
-    if len(photos) >= text.MAX_BROADCAST_PHOTOS:
-        await message.answer(text.BROADCAST_PHOTO_LIMIT)
+    if len(media) >= text.MAX_BROADCAST_MEDIA:
+        await message.answer(text.BROADCAST_MEDIA_LIMIT)
         return
 
-    # Добавляем фото (в альбоме message.photo содержит текущее фото)
-    photo_id = message.photo[-1].file_id
-    if photo_id not in photos:
-        photos.append(photo_id)
+    if message.photo:
+        item = {"type": "photo", "file_id": message.photo[-1].file_id}
+    elif message.video:
+        item = {"type": "video", "file_id": message.video.file_id}
+    else:
+        return
+
+    if item not in media:
+        media.append(item)
 
     current_text = data.get("text")
-    update_payload = {"photos": photos}
+    update_payload = {"media": media}
 
     # Берём подпись из первого сообщения альбома
     if message.caption and not current_text:
@@ -338,33 +383,33 @@ async def process_broadcast_album(message: Message, state: FSMContext):
     await state.update_data(**update_payload)
 
     # Чтобы не спамить уведомлениями на каждый файл альбома — отвечаем только один раз
-    if message.media_group_id and len(photos) == 1:  # первое фото в группе
+    if message.media_group_id and len(media) == 1:  # первый файл в группе
         data = await state.get_data()
         await message.answer(
-            text.broadcast_status(current_text, len(photos), btn_text=data.get("btn_text"), btn_url=data.get("btn_url")),
+            text.broadcast_status(current_text, media, btn_text=data.get("btn_text"), btn_url=data.get("btn_url")),
             reply_markup=ctrl.broadcast_compose_kb(has_button=bool(data.get("btn_url"))),
             parse_mode="HTML"
         )
-    await message.answer("📸 Фото добавлено в альбом")
+    await message.answer("🎬 Медиа добавлено в альбом")
 
 
 @router.message(Broadcast.waiting_text, F.photo)
 async def process_broadcast_photo(message: Message, state: FSMContext):
     """Одиночное фото"""
     data = await state.get_data()
-    photos: list[str] = data.get("photos") or []
+    media: list[dict[str, str]] = data.get("media") or []
 
-    if len(photos) >= text.MAX_BROADCAST_PHOTOS:
+    if len(media) >= text.MAX_BROADCAST_MEDIA:
         await message.answer(
-            text.BROADCAST_PHOTO_LIMIT,
+            text.BROADCAST_MEDIA_LIMIT,
             reply_markup=ctrl.broadcast_compose_kb()
         )
         return
 
-    photos.append(message.photo[-1].file_id)
+    media.append({"type": "photo", "file_id": message.photo[-1].file_id})
 
     current_text = data.get("text")
-    update_payload = {"photos": photos}
+    update_payload = {"media": media}
 
     if message.caption and not current_text:
         current_text = message.caption
@@ -375,7 +420,38 @@ async def process_broadcast_photo(message: Message, state: FSMContext):
 
     data = await state.get_data()
     await message.answer(
-        text.broadcast_status(current_text, len(photos), btn_text=data.get("btn_text"), btn_url=data.get("btn_url")),
+        text.broadcast_status(current_text, media, btn_text=data.get("btn_text"), btn_url=data.get("btn_url")),
+        reply_markup=ctrl.broadcast_compose_kb(has_button=bool(data.get("btn_url"))),
+        parse_mode="HTML"
+    )
+
+
+@router.message(Broadcast.waiting_text, F.video)
+async def process_broadcast_video(message: Message, state: FSMContext):
+    """Одиночное видео, которое будет отправлено как Telegram video."""
+    data = await state.get_data()
+    media: list[dict[str, str]] = data.get("media") or []
+
+    if len(media) >= text.MAX_BROADCAST_MEDIA:
+        await message.answer(
+            text.BROADCAST_MEDIA_LIMIT,
+            reply_markup=ctrl.broadcast_compose_kb()
+        )
+        return
+
+    media.append({"type": "video", "file_id": message.video.file_id})
+    current_text = data.get("text")
+    update_payload = {"media": media}
+
+    if message.caption and not current_text:
+        current_text = message.caption
+        update_payload["text"] = current_text
+        update_payload["caption_entities"] = message.caption_entities
+
+    await state.update_data(**update_payload)
+    data = await state.get_data()
+    await message.answer(
+        text.broadcast_status(current_text, media, btn_text=data.get("btn_text"), btn_url=data.get("btn_url")),
         reply_markup=ctrl.broadcast_compose_kb(has_button=bool(data.get("btn_url"))),
         parse_mode="HTML"
     )
@@ -388,10 +464,10 @@ async def process_broadcast_text(message: Message, state: FSMContext):
         caption_entities=message.entities
     )
     data = await state.get_data()
-    photos = data.get("photos") or []
+    media = data.get("media") or []
 
     await message.answer(
-        text.broadcast_status(message.text, len(photos), btn_text=data.get("btn_text"), btn_url=data.get("btn_url")),
+        text.broadcast_status(message.text, media, btn_text=data.get("btn_text"), btn_url=data.get("btn_url")),
         reply_markup=ctrl.broadcast_compose_kb(has_button=bool(data.get("btn_url"))),
         parse_mode="HTML"
     )
@@ -431,10 +507,10 @@ async def process_button_url(message: Message, state: FSMContext):
     await state.set_state(Broadcast.waiting_text)
 
     data = await state.get_data()
-    photos = data.get("photos") or []
+    media = data.get("media") or []
     await message.answer(
         text.BUTTON_ADDED + "\n\n" + text.broadcast_status(
-            data.get("text"), len(photos), btn_text=data.get("btn_text"), btn_url=url
+            data.get("text"), media, btn_text=data.get("btn_text"), btn_url=url
         ),
         reply_markup=ctrl.broadcast_compose_kb(has_button=True),
         parse_mode="HTML"
@@ -445,9 +521,9 @@ async def process_button_url(message: Message, state: FSMContext):
 async def cb_broadcast_remove_button(callback: CallbackQuery, state: FSMContext):
     await state.update_data(btn_text=None, btn_url=None)
     data = await state.get_data()
-    photos = data.get("photos") or []
+    media = data.get("media") or []
     await callback.message.answer(
-        text.BUTTON_REMOVED + "\n\n" + text.broadcast_status(data.get("text"), len(photos)),
+        text.BUTTON_REMOVED + "\n\n" + text.broadcast_status(data.get("text"), media),
         reply_markup=ctrl.broadcast_compose_kb(has_button=False),
         parse_mode="HTML"
     )
@@ -458,10 +534,10 @@ async def cb_broadcast_remove_button(callback: CallbackQuery, state: FSMContext)
 async def cb_broadcast_cancel_button(callback: CallbackQuery, state: FSMContext):
     await state.set_state(Broadcast.waiting_text)
     data = await state.get_data()
-    photos = data.get("photos") or []
+    media = data.get("media") or []
     await callback.message.answer(
         text.broadcast_status(
-            data.get("text"), len(photos),
+            data.get("text"), media,
             btn_text=data.get("btn_text"), btn_url=data.get("btn_url")
         ),
         reply_markup=ctrl.broadcast_compose_kb(has_button=bool(data.get("btn_url"))),
@@ -474,12 +550,12 @@ async def cb_broadcast_cancel_button(callback: CallbackQuery, state: FSMContext)
 async def cb_broadcast_done(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     broadcast_text = data.get("text")
-    photos: list[str] = data.get("photos") or []
+    media: list[dict[str, str]] = data.get("media") or []
     caption_entities = data.get("caption_entities")
     btn_text = data.get("btn_text")
     btn_url = data.get("btn_url")
 
-    if not broadcast_text and not photos:
+    if not broadcast_text and not media:
         await callback.answer(text.BROADCAST_EMPTY, show_alert=True)
         return
 
@@ -494,21 +570,18 @@ async def cb_broadcast_done(callback: CallbackQuery, state: FSMContext):
     post_kb = ctrl.broadcast_post_button_kb(btn_text, btn_url) if btn_text and btn_url else None
 
     # Предпросмотр с сохранением форматирования
-    if not photos:
+    if not media:
         await callback.message.answer(broadcast_text, entities=caption_entities, reply_markup=post_kb)
-    elif len(photos) == 1:
-        await callback.message.answer_photo(
-            photos[0],
-            caption=broadcast_text,
-            caption_entities=caption_entities,
-            reply_markup=post_kb
-        )
+    elif len(media) == 1:
+        item = media[0]
+        send_method = callback.message.answer_photo if item["type"] == "photo" else callback.message.answer_video
+        await send_method(item["file_id"], caption=broadcast_text, caption_entities=caption_entities, reply_markup=post_kb)
     else:
-        media = [InputMediaPhoto(media=p) for p in photos]
+        media_group = build_broadcast_media(media)
         if broadcast_text:
-            media[0].caption = broadcast_text
-            media[0].caption_entities = caption_entities
-        await callback.message.answer_media_group(media)
+            media_group[0].caption = broadcast_text
+            media_group[0].caption_entities = caption_entities
+        await callback.message.answer_media_group(media_group)
         # Для альбома кнопку прикрепляем отдельным сообщением в предпросмотре
         if post_kb:
             await callback.message.answer("☝️ К посту будет прикреплена кнопка выше.", reply_markup=post_kb)
@@ -537,7 +610,7 @@ async def cb_broadcast_send(callback: CallbackQuery, state: FSMContext):
 
     data = await state.get_data()
     broadcast_text = data.get("text")
-    photos: list[str] = data.get("photos") or []
+    media: list[dict[str, str]] = data.get("media") or []
     caption_entities = data.get("caption_entities")
     btn_text = data.get("btn_text")
     btn_url = data.get("btn_url")
@@ -547,48 +620,62 @@ async def cb_broadcast_send(callback: CallbackQuery, state: FSMContext):
     total_users = len(users)
     count = 0
     errors = 0
+    blocked = 0
+    rate_limit_errors = 0
 
     # --- Сама рассылка ---
     for u in users:
         try:
-            if not photos:
-                await callback.bot.send_message(
-                    u["user_id"],
-                    broadcast_text,
-                    entities=caption_entities,
-                    reply_markup=post_kb
+            if not media:
+                await send_broadcast_request(
+                    lambda: callback.bot.send_message(
+                        u["user_id"],
+                        broadcast_text,
+                        entities=caption_entities,
+                        reply_markup=post_kb
+                    )
                 )
-            elif len(photos) == 1:
-                await callback.bot.send_photo(
-                    u["user_id"],
-                    photos[0],
-                    caption=broadcast_text,
-                    caption_entities=caption_entities,
-                    reply_markup=post_kb
+            elif len(media) == 1:
+                item = media[0]
+                send_method = callback.bot.send_photo if item["type"] == "photo" else callback.bot.send_video
+                await send_broadcast_request(
+                    lambda: send_method(
+                        u["user_id"],
+                        item["file_id"],
+                        caption=broadcast_text,
+                        caption_entities=caption_entities,
+                        reply_markup=post_kb
+                    )
                 )
             else:
-                media = [InputMediaPhoto(media=p) for p in photos]
+                media_group = build_broadcast_media(media)
                 if broadcast_text:
-                    media[0].caption = broadcast_text
-                    media[0].caption_entities = caption_entities
-                await callback.bot.send_media_group(u["user_id"], media)
+                    media_group[0].caption = broadcast_text
+                    media_group[0].caption_entities = caption_entities
+                await send_broadcast_request(
+                    lambda: callback.bot.send_media_group(u["user_id"], media_group)
+                )
                 if post_kb:
-                    await callback.bot.send_message(u["user_id"], "👇", reply_markup=post_kb)
+                    await send_broadcast_request(
+                        lambda: callback.bot.send_message(u["user_id"], "👇", reply_markup=post_kb)
+                    )
 
             count += 1
 
-            # Небольшая задержка, чтобы не попасть под лимиты Telegram
-            await asyncio.sleep(0.045)  # ~28-30 сообщений в секунду
-
+        except TelegramForbiddenError:
+            blocked += 1
+        except TelegramRetryAfter:
+            rate_limit_errors += 1
         except Exception:
             errors += 1
-            # Пропускаем заблокированных и т.д.
 
     # --- Финальное сообщение ---
     result_text = (
         f"✅ <b>Рассылка завершена!</b>\n\n"
         f"✅ Успешно доставлено: <b>{count}</b> из {total_users}\n"
-        f"❌ Ошибок: {errors}"
+        f"🚫 Заблокировали бота: {blocked}\n"
+        f"⏳ Не доставлено после ограничения Telegram: {rate_limit_errors}\n"
+        f"❌ Других ошибок: {errors}"
     )
 
     try:
